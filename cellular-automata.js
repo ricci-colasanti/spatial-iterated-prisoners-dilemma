@@ -8,13 +8,10 @@ export class Agent{
 }
 
 export class Cell {
-  static now = 0;
-  static next = 1;
-
   constructor(xpos, ypos) {
     this.xpos = xpos;
     this.ypos = ypos;
-    this.occupant = [null,null];
+    this.occupant = null;
     this.neighbours = [];
   }
 
@@ -23,16 +20,13 @@ export class Cell {
   }
 
   getOccupant() {
-    return this.occupant[Cell.now];
+    return this.occupant;
   }
 
-  setOccupantNow(occupant) {
-    this.occupant[Cell.now]=occupant;
+  setOccupant(occupant) {
+    this.occupant=occupant;
   }
 
-  setOccupantNext(occupant) {
-    this.occupant[Cell.now]=occupant;
-  }
 }
 
 export default class Grid {

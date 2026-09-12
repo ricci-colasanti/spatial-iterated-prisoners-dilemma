@@ -25,6 +25,26 @@
         <canvas id="SIPDCanvas"></canvas>
 
         <script type="module">
+
+            class Prisoner extends Agent{
+              static payoff = {
+                C: { C: 1, D: 0 },   // cooperator vs cooperator / vs defector
+                D: { C: 1.9, D: 0 },   // defector   vs cooperator / vs defector
+              };
+               constructor(home,state){
+                 super(home);
+                 this.state = state;
+                 this.score = 0;
+               }
+
+               trial(){
+                 this.score = 0;
+                 for(const n in this.home.neighbours){
+                   nAgent = n.getOccupantNow();
+                   this.score+= nAgent.payoff[this.state][nAgent.state];
+                 }
+               }
+            }
             import CACanvas from "./ca-canvas.js";
             import Grid, { Agent } from "./cellular-automata.js";
 
@@ -38,14 +58,12 @@
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
                         const cell = gridInstance.cells[y][x];
+                        const newAgent = new Agent(cell);
+                        cell.setOccupant(newAgent);
                         if (Math.random() < 0.5){
-                          let newAgent = new Agent(cell);
-                          newAgent.setState("W")
-                          cell.setOccupantNow("W");
+                          newAgent.setState("D");
                         }else{
-                          let newAgent = new Agent(cell);
-                          newAgent.setState("B")
-                          cell.setOccupantNow("B");
+                          newAgent.setState("C");
                         };
                     }
                 }
@@ -58,11 +76,11 @@
                         const cell = gridInstance.getCell(y, x);
                         const occupant = cell.getOccupant();
                         let colour = "";
-                        if (occupant == "W") {
-                            colour = "red";
-                        }
-                        if (occupant == "B") {
+                        if (occupant.state == "D") {
                             colour = "blue";
+                        }
+                        if (occupant.state == "C") {
+                            colour = "red";
                         }
                         caCanvas.drawSquareAt(x, y, colour, true);
                     }

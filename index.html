@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Spatial Iterated Prisoners Dilemma</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                background-color: #eeeeee;
+                width: 100vw;
+                height: 100vh;
+            }
+            canvas {
+                display: block;
+                border: none;
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="SIPDCanvas"></canvas>
+
+        <script type="module">
+            import CACanvas from "./ca-canvas.js";
+            import Grid, { Agent } from "./cellular-automata.js";
+
+            const canvasElement = document.getElementById("SIPDCanvas");
+            const caCanvas = new CACanvas(canvasElement, 30);
+            caCanvas.resizeAndReset();
+            let gridInstance;
+
+            function init() {
+                gridInstance = new Grid(caCanvas.cols, caCanvas.rows);
+                for (let y = 0; y < gridInstance.rows; y++) {
+                    for (let x = 0; x < gridInstance.cols; x++) {
+                        const cell = gridInstance.cells[y][x];
+                        if (Math.random() < 0.5){
+                          let newAgent = new Agent(cell);
+                          newAgent.setState("W")
+                          cell.setOccupantNow("W");
+                        }else{
+                          let newAgent = new Agent(cell);
+                          newAgent.setState("B")
+                          cell.setOccupantNow("B");
+                        };
+                    }
+                }
+            }
+
+            function drawGrid() {
+                caCanvas.clear();
+                for (let y = 0; y < gridInstance.rows; y++) {
+                    for (let x = 0; x < gridInstance.cols; x++) {
+                        const cell = gridInstance.getCell(y, x);
+                        const occupant = cell.getOccupant();
+                        let colour = "";
+                        if (occupant == "W") {
+                            colour = "red";
+                        }
+                        if (occupant == "B") {
+                            colour = "blue";
+                        }
+                        caCanvas.drawSquareAt(x, y, colour, true);
+                    }
+                }
+            }
+            init();
+            drawGrid();
+        </script>
+    </body>
+</html>

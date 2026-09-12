@@ -75,8 +75,11 @@
             import CACanvas from "./ca-canvas.js";
             import Grid, { Agent } from "./cellular-automata.js";
 
+            window.addEventListener("resize", handleResize);
             const canvasElement = document.getElementById("SIPDCanvas");
             const caCanvas = new CACanvas(canvasElement, 60);
+
+
             caCanvas.resizeAndReset();
             let gridInstance;
             let running = false;
@@ -149,6 +152,10 @@
                 }
             }
             init();
+            function handleResize() {
+                caCanvas.resizeAndReset();
+                init()
+            }
         </script>
     </body>
 </html>

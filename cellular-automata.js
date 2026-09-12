@@ -1,6 +1,7 @@
 export class Agent{
   constructor(home) {
     this.home = home;
+    home.setOccupant(this)
   }
   setState(state) {
     this.state = state;
@@ -52,6 +53,7 @@ export default class Grid {
         this.cells[y][x] = new Cell(x, y, "");
       }
     }
+    this.setNeighbours();
   }
 
   setNeighbours() {

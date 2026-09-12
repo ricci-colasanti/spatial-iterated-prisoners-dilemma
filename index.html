@@ -84,6 +84,7 @@
             let gridInstance;
             let running = false;
             let speed = 100;
+            let loopStarted = false;
 
 
             function iterate() {
@@ -131,7 +132,10 @@
                 Prisoner.update();
                 drawGrid();
                 running = true;
-                timeLoop();
+                if (!loopStarted) {
+                    loopStarted = true;
+                    timeLoop();
+                }
             }
 
             function drawGrid() {

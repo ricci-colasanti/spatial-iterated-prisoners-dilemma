@@ -5,6 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Spatial Iterated Prisoners Dilemma</title>
         <style>
+            /* Full-bleed canvas: no scrollbars, no margins, fills viewport. */
             body {
                 margin: 0;
                 padding: 0;
@@ -25,14 +26,64 @@
         <canvas id="SIPDCanvas"></canvas>
 
         <script type="module">
+            // ─────────────────────────────────────────────────────────────
+            // IMPORTS
+            // ─────────────────────────────────────────────────────────────
+            // ES module imports are hoisted, so `Agent` is available to the
+            // `class Prisoner extends Agent` declaration below even though
+            // the import appears later in the file. (We kept the original
+            // order for fidelity, but convention is to put imports first.)
+            import CACanvas from "./ca-canvas.js";
+            import Grid, { Agent } from "./cellular-automata.js";
+
+            // ─────────────────────────────────────────────────────────────
+            // Prisoner — an Agent that plays the Prisoner's Dilemma
+            // ─────────────────────────────────────────────────────────────
+            /**
+             * A single player in the spatial iterated Prisoner's Dilemma.
+             *
+             * Each Prisoner:
+             *   - has a pure strategy: "C" (cooperate) or "D" (defect),
+             *   - accumulates a score from playing all 8 neighbours once
+             *     per generation,
+             *   - on the next generation, adopts the strategy of whichever
+             *     of {itself, its neighbours} scored highest.
+             *
+             * State is double-buffered so updates can be synchronous:
+             *   `state[now]`  = strategy used this generation
+             *   `state[next]` = strategy that will be used next generation
+             *
+             * `Prisoner.update()` flips `now`/`next` for everyone at once.
+             */
             class Prisoner extends Agent {
+                /**
+                 * Payoff matrix indexed by [myStrategy][theirStrategy].
+                 *
+                 * With T = 1.6 this sits in the "static patterns" regime
+                 * of Nowak & May (1992): cooperator clusters survive in
+                 * stable, non-chaotic shapes.
+                 *
+                 *  - C vs C → 1   (reward)
+                 *  - C vs D → 0   (sucker)
+                 *  - D vs C → 1.6 (temptation)
+                 *  - D vs D → 0   (punishment)
+                 */
                 static payoff = {
                     C: { C: 1, D: 0 },
                     D: { C: 1.6, D: 0 },
                 };
+
+                /** Index into `state[]` for the current generation. */
                 static now = 0;
+
+                /** Index into `state[]` for the next generation. */
                 static next = 1;
 
+                /**
+                 * Flip `now` and `next` for every Prisoner at once.
+                 * Call exactly once per generation, *after* every agent
+                 * has run `trial()` and `change()`.
+                 */
                 static update() {
                     [Prisoner.now, Prisoner.next] = [
                         Prisoner.next,
@@ -40,60 +91,140 @@
                     ];
                 }
 
+                /**
+                 * @param {Cell}   home   The cell this prisoner occupies.
+                 * @param {string} [state] Initial strategy, "C" or "D".
+                 *                         (Currently often undefined; the
+                 *                         caller sets it via setState.)
+                 */
                 constructor(home, state) {
-                    super(home);
+                    super(home); // also registers us with `home`
+
+                    // Double buffer: [current, next].
                     this.state = [state, ""];
+
+                    /** @type {number} Payoff accumulated this generation. */
                     this.score = 0;
+
+                    /**
+                     * True if, during the last `change()`, we switched
+                     * strategy because a neighbour out-scored us. Used
+                     * only for the "recently changed" tint in drawGrid.
+                     * @type {boolean}
+                     */
                     this.changed = false;
                 }
 
+                /**
+                 * Play one round of the Prisoner's Dilemma against every
+                 * neighbour and sum the payoffs into `this.score`.
+                 *
+                 * Reads **current** state via `getState()`; the neighbour's
+                 * current state likewise. Does not modify `this.state`.
+                 */
                 trial() {
                     this.score = 0;
                     for (let i = 0; i < this.home.neighbours.length; i++) {
-                        let nAgent = this.home.neighbours[i].getOccupant();
+                        const nAgent = this.home.neighbours[i].getOccupant();
                         this.score +=
                             Prisoner.payoff[this.getState()][nAgent.getState()];
                     }
                 }
 
+                /**
+                 * Decide next-generation strategy by imitating the highest
+                 * scorer among {self, neighbours}.
+                 *
+                 * Writes to `state[next]` via `setState`; the actual flip
+                 * happens later in `Prisoner.update()`.
+                 *
+                 * Side effect: sets `this.changed` to true iff we ended up
+                 * copying *someone else's* strategy.
+                 */
                 change() {
-                    let choice = this;
+                    let choice = this; // current best candidate
                     this.changed = false;
+
                     for (let i = 0; i < this.home.neighbours.length; i++) {
-                        let nAgent = this.home.neighbours[i].getOccupant();
+                        const nAgent = this.home.neighbours[i].getOccupant();
+
+                        // Strictly greater → ties keep the earlier pick.
                         if (choice.score < nAgent.score) {
                             choice = nAgent;
                             this.changed = true;
                         }
                     }
-                    this.setState(choice.getState());
 
+                    this.setState(choice.getState());
                 }
 
+                /**
+                 * @returns {string} Strategy being played this generation
+                 *                   ("C" or "D").
+                 */
                 getState() {
                     return this.state[Prisoner.now];
                 }
 
+                /**
+                 * Queue the strategy to be played next generation.
+                 * Does not take effect until `Prisoner.update()`.
+                 * @param {string} state "C" or "D".
+                 */
                 setState(state) {
                     this.state[Prisoner.next] = state;
                 }
             }
 
-            import CACanvas from "./ca-canvas.js";
-            import Grid, { Agent } from "./cellular-automata.js";
-
+            // ─────────────────────────────────────────────────────────────
+            // SETUP
+            // ─────────────────────────────────────────────────────────────
             window.addEventListener("resize", handleResize);
+
             const canvasElement = document.getElementById("SIPDCanvas");
+
+            /** Draw helper: 60 rows tall, cell size derived from viewport. */
             const caCanvas = new CACanvas(canvasElement, 60);
 
             caCanvas.resizeAndReset();
+
+            /** @type {Grid|undefined} The simulation grid. */
             let gridInstance;
+
+            /** Whether the animation loop should step the simulation. */
             let running = false;
+
+            /** Milliseconds between generations. */
             let speed = 100;
+
+            /**
+             * Guards against starting multiple `setTimeout` chains when
+             * `init()` is called more than once (e.g. on resize).
+             */
             let loopStarted = false;
 
+            // ─────────────────────────────────────────────────────────────
+            // SIMULATION LOOP
+            // ─────────────────────────────────────────────────────────────
+
+            /**
+             * Advance the simulation by one generation.
+             *
+             * Order matters — this is the synchronous ("simultaneous")
+             * update rule from Nowak & May:
+             *   1. Every agent scores against its neighbours (trial).
+             *   2. Every agent picks next-gen strategy (change).
+             *   3. Flip the double buffer (Prisoner.update).
+             *   4. Redraw.
+             *
+             * If steps 1 and 2 were interleaved, agents would read
+             * already-updated neighbours and the update would be
+             * asynchronous instead.
+             */
             function iterate() {
                 if (!gridInstance) return;
+
+                // Pass 1: everyone scores.
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
                         const cell = gridInstance.cells[y][x];
@@ -101,6 +232,8 @@
                         agent.trial();
                     }
                 }
+
+                // Pass 2: everyone chooses.
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
                         const cell = gridInstance.cells[y][x];
@@ -108,10 +241,21 @@
                         agent.change();
                     }
                 }
+
+                // Pass 3: commit next-gen strategies globally.
                 Prisoner.update();
+
+                // Pass 4: reflect the new state on screen.
                 drawGrid();
             }
 
+            /**
+             * Self-rescheduling animation loop. Steps the simulation while
+             * `running` is true, then re-arms itself after `speed` ms.
+             *
+             * The timeout keeps running even when paused — cheap, and lets
+             * `running` be flipped back on without restarting the loop.
+             */
             function timeLoop() {
                 if (running) {
                     iterate();
@@ -119,13 +263,30 @@
                 setTimeout(timeLoop, speed);
             }
 
+            // ─────────────────────────────────────────────────────────────
+            // INITIALISATION
+            // ─────────────────────────────────────────────────────────────
+
+            /**
+             * (Re)create the grid, populate it with random Prisoners, and
+             * start the animation loop if it isn't already running.
+             *
+             * Called on load and on every window resize.
+             */
             function init() {
                 gridInstance = new Grid(caCanvas.cols, caCanvas.rows);
+
+                // Populate each cell with a random C or D.
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
                         const cell = gridInstance.cells[y][x];
+
+                        // Agent self-registers with `cell` in its ctor,
+                        // so `cell.setOccupant(...)` below is redundant.
                         const newAgent = new Prisoner(cell);
                         cell.setOccupant(newAgent);
+
+                        // 50/50 coin flip for initial strategy.
                         if (Math.random() < 0.5) {
                             newAgent.setState("D");
                         } else {
@@ -133,45 +294,76 @@
                         }
                     }
                 }
+
+                // Commit initial strategies to the "now" buffer, then draw.
                 Prisoner.update();
                 drawGrid();
+
                 running = true;
+
+                // Only ever start one loop chain.
                 if (!loopStarted) {
                     loopStarted = true;
                     timeLoop();
                 }
             }
 
+            // ─────────────────────────────────────────────────────────────
+            // RENDERING
+            // ─────────────────────────────────────────────────────────────
+
+            /**
+             * Repaint the whole grid.
+             *
+             * Colour scheme:
+             *   - D, unchanged → blue
+             *   - D, changed   → light blue
+             *   - C, unchanged → red
+             *   - C, changed   → light red
+             *
+             * The border stroke (4th arg `true`) keeps adjacent cells
+             * visually separated even when colours are similar.
+             */
             function drawGrid() {
                 caCanvas.clear();
+
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
-                        const cell = gridInstance.getCell(y, x);
+                        const cell = gridInstance.getCell(y, x); // note (y, x)
                         const occupant = cell.getOccupant();
+
                         let colour = "";
+
                         if (occupant.getState() == "D") {
-                            if (occupant.changed) {
-                                colour = "#9999ff";
-                            } else {
-                                colour = "#0000ff";
-                            }
+                            colour = occupant.changed ? "#9999ff" : "#0000ff";
                         }
                         if (occupant.getState() == "C") {
-                            if (occupant.changed) {
-                                colour = "#ff9999";
-                            } else {
-                                colour = "#ff0000";
-                            }
+                            colour = occupant.changed ? "#ff9999" : "#ff0000";
                         }
+
                         caCanvas.drawSquareAt(x, y, colour, true);
                     }
                 }
             }
-            init();
+
+            // ─────────────────────────────────────────────────────────────
+            // EVENT HANDLERS
+            // ─────────────────────────────────────────────────────────────
+
+            /**
+             * On window resize: recompute grid geometry and rebuild the
+             * simulation. Note this discards the current simulation state
+             * and starts a fresh random grid.
+             */
             function handleResize() {
                 caCanvas.resizeAndReset();
                 init();
             }
+
+            // ─────────────────────────────────────────────────────────────
+            // GO
+            // ─────────────────────────────────────────────────────────────
+            init();
         </script>
     </body>
 </html>

@@ -5,7 +5,6 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Spatial Iterated Prisoners Dilemma</title>
         <style>
-            /* Full-bleed canvas: no scrollbars, no margins, fills viewport. */
             body {
                 margin: 0;
                 padding: 0;
@@ -26,63 +25,32 @@
         <canvas id="SIPDCanvas"></canvas>
 
         <script type="module">
-            // ─────────────────────────────────────────────────────────────
-            // IMPORTS
-            // ─────────────────────────────────────────────────────────────
-            // ES module imports are hoisted, so `Agent` is available to the
-            // `class Prisoner extends Agent` declaration below even though
-            // the import appears later in the file. (We kept the original
-            // order for fidelity, but convention is to put imports first.)
-            import CACanvas from "./ca-canvas.js";
-            import Grid, { Agent } from "./cellular-automata.js";
-
-            // ─────────────────────────────────────────────────────────────
-            // Prisoner — an Agent that plays the Prisoner's Dilemma
-            // ─────────────────────────────────────────────────────────────
             /**
-             * A single player in the spatial iterated Prisoner's Dilemma.
+             * Prisoner Class - Implements agents playing the Iterated Symmetric Prisoner's Dilemma
              *
-             * Each Prisoner:
-             *   - has a pure strategy: "C" (cooperate) or "D" (defect),
-             *   - accumulates a score from playing all 8 neighbours once
-             *     per generation,
-             *   - on the next generation, adopts the strategy of whichever
-             *     of {itself, its neighbours} scored highest.
+             * This simulation models how cooperation (C) and defection (D) strategies spread
+             * through a population based on payoffs from neighbor interactions.
              *
-             * State is double-buffered so updates can be synchronous:
-             *   `state[now]`  = strategy used this generation
-             *   `state[next]` = strategy that will be used next generation
-             *
-             * `Prisoner.update()` flips `now`/`next` for everyone at once.
+             * Payoff Matrix:
+             *   - Mutual Cooperation (C vs C): Both get 1 point
+             *   - Defector vs Cooperator: Defector gets 1.6, Cooperator gets 0
+             *   - Mutual Defection (D vs D): Both get 0 points
              */
             class Prisoner extends Agent {
-                /**
-                 * Payoff matrix indexed by [myStrategy][theirStrategy].
-                 *
-                 * With T = 1.6 this sits in the "static patterns" regime
-                 * of Nowak & May (1992): cooperator clusters survive in
-                 * stable, non-chaotic shapes.
-                 *
-                 *  - C vs C → 1   (reward)
-                 *  - C vs D → 0   (sucker)
-                 *  - D vs C → 1.6 (temptation)
-                 *  - D vs D → 0   (punishment)
-                 */
+                // Static payoff matrix defining points earned for each strategy combination
+                // Format: payoff[my_strategy][opponent_strategy] = points
                 static payoff = {
-                    C: { C: 1, D: 0 },
-                    D: { C: 1.6, D: 0 },
+                    C: { C: 1, D: 0 }, // Cooperating: get 1 vs cooperator, 0 vs defector
+                    D: { C: 1.6, D: 0 }, // Defecting: get 1.6 vs cooperator, 0 vs defector
                 };
 
-                /** Index into `state[]` for the current generation. */
-                static now = 0;
-
-                /** Index into `state[]` for the next generation. */
-                static next = 1;
+                // Double-buffering system for state management (prevents race conditions during updates)
+                static now = 0; // Index pointing to current active state
+                static next = 1; // Index pointing to buffer for next state
 
                 /**
-                 * Flip `now` and `next` for every Prisoner at once.
-                 * Call exactly once per generation, *after* every agent
-                 * has run `trial()` and `change()`.
+                 * Swaps the now/next buffers to finalize the update cycle
+                 * Called once per iteration after all agents have computed their next state
                  */
                 static update() {
                     [Prisoner.now, Prisoner.next] = [
@@ -92,139 +60,99 @@
                 }
 
                 /**
-                 * @param {Cell}   home   The cell this prisoner occupies.
-                 * @param {string} [state] Initial strategy, "C" or "D".
-                 *                         (Currently often undefined; the
-                 *                         caller sets it via setState.)
+                 * @param {Cell} home - The grid cell this agent occupies
+                 * @param {string} state - Initial strategy ('C' for cooperate, 'D' for defect)
                  */
                 constructor(home, state) {
-                    super(home); // also registers us with `home`
-
-                    // Double buffer: [current, next].
+                    super(home);
+                    // Double-buffered state array: [currentState, nextState]
                     this.state = [state, ""];
-
-                    /** @type {number} Payoff accumulated this generation. */
-                    this.score = 0;
-
-                    /**
-                     * True if, during the last `change()`, we switched
-                     * strategy because a neighbour out-scored us. Used
-                     * only for the "recently changed" tint in drawGrid.
-                     * @type {boolean}
-                     */
-                    this.changed = false;
+                    this.score = 0; // Current iteration's accumulated score
+                    this.changed = false; // Flag indicating if agent copied a neighbor's strategy
                 }
 
                 /**
-                 * Play one round of the Prisoner's Dilemma against every
-                 * neighbour and sum the payoffs into `this.score`.
-                 *
-                 * Reads **current** state via `getState()`; the neighbour's
-                 * current state likewise. Does not modify `this.state`.
+                 * Plays the Prisoner's Dilemma game against all neighboring cells
+                 * Accumulates score based on payoff matrix and neighbor strategies
+                 * Note: Scores are summed across all neighbors (not averaged)
                  */
                 trial() {
                     this.score = 0;
                     for (let i = 0; i < this.home.neighbours.length; i++) {
-                        const nAgent = this.home.neighbours[i].getOccupant();
+                        let nAgent = this.home.neighbours[i].getOccupant();
                         this.score +=
                             Prisoner.payoff[this.getState()][nAgent.getState()];
                     }
                 }
 
                 /**
-                 * Decide next-generation strategy by imitating the highest
-                 * scorer among {self, neighbours}.
-                 *
-                 * Writes to `state[next]` via `setState`; the actual flip
-                 * happens later in `Prisoner.update()`.
-                 *
-                 * Side effect: sets `this.changed` to true iff we ended up
-                 * copying *someone else's* strategy.
+                 * Strategy update rule: compare scores with neighbors and adopt the highest-scoring strategy
+                 * If any neighbor has a higher score, this agent copies their strategy
+                 * Implements "imitation of the successful" evolutionary dynamics
                  */
                 change() {
-                    let choice = this; // current best candidate
+                    let choice = this; // Default to keeping own strategy
                     this.changed = false;
 
+                    // Find neighbor with highest score
                     for (let i = 0; i < this.home.neighbours.length; i++) {
-                        const nAgent = this.home.neighbours[i].getOccupant();
-
-                        // Strictly greater → ties keep the earlier pick.
+                        let nAgent = this.home.neighbours[i].getOccupant();
                         if (choice.score < nAgent.score) {
                             choice = nAgent;
                             this.changed = true;
                         }
                     }
-
+                    // Adopt the winning neighbor's strategy (or keep own if tied/no better neighbor)
                     this.setState(choice.getState());
                 }
 
                 /**
-                 * @returns {string} Strategy being played this generation
-                 *                   ("C" or "D").
+                 * Gets the current active state using double-buffering
+                 * @returns {string} - Current strategy ('C' or 'D')
                  */
                 getState() {
                     return this.state[Prisoner.now];
                 }
 
                 /**
-                 * Queue the strategy to be played next generation.
-                 * Does not take effect until `Prisoner.update()`.
-                 * @param {string} state "C" or "D".
+                 * Sets the next state in the buffer (doesn't take effect until update())
+                 * @param {string} state - New strategy to adopt for next iteration
                  */
                 setState(state) {
                     this.state[Prisoner.next] = state;
                 }
             }
 
-            // ─────────────────────────────────────────────────────────────
-            // SETUP
-            // ─────────────────────────────────────────────────────────────
+            // Import dependencies for canvas rendering and grid infrastructure
+            import CACanvas from "./ca-canvas.js";
+            import Grid, { Agent } from "./cellular-automata.js";
+
+            // Handle browser resize events
             window.addEventListener("resize", handleResize);
 
+            // Get canvas DOM element and initialize custom canvas controller
             const canvasElement = document.getElementById("SIPDCanvas");
-
-            /** Draw helper: 60 rows tall, cell size derived from viewport. */
             const caCanvas = new CACanvas(canvasElement, 60);
 
+            // Initialize canvas dimensions
             caCanvas.resizeAndReset();
 
-            /** @type {Grid|undefined} The simulation grid. */
-            let gridInstance;
-
-            /** Whether the animation loop should step the simulation. */
-            let running = false;
-
-            /** Milliseconds between generations. */
-            let speed = 100;
+            let gridInstance; // Reference to the cellular automata grid
+            let running = false; // Simulation control flag
+            let speed = 100; // Milliseconds between iterations (lower = faster)
+            let loopStarted = false; // Prevent multiple animation loops from starting
 
             /**
-             * Guards against starting multiple `setTimeout` chains when
-             * `init()` is called more than once (e.g. on resize).
-             */
-            let loopStarted = false;
-
-            // ─────────────────────────────────────────────────────────────
-            // SIMULATION LOOP
-            // ─────────────────────────────────────────────────────────────
-
-            /**
-             * Advance the simulation by one generation.
-             *
-             * Order matters — this is the synchronous ("simultaneous")
-             * update rule from Nowak & May:
-             *   1. Every agent scores against its neighbours (trial).
-             *   2. Every agent picks next-gen strategy (change).
-             *   3. Flip the double buffer (Prisoner.update).
-             *   4. Redraw.
-             *
-             * If steps 1 and 2 were interleaved, agents would read
-             * already-updated neighbours and the update would be
-             * asynchronous instead.
+             * Main iteration function - advances the simulation by one timestep
+             * Executes in three phases:
+             * 1. All agents play games and calculate scores
+             * 2. All agents update strategies based on neighbor comparison
+             * 3. Swap state buffers and redraw
              */
             function iterate() {
                 if (!gridInstance) return;
 
-                // Pass 1: everyone scores.
+                // Phase 1: Calculate scores for all agents
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
                         const cell = gridInstance.cells[y][x];
@@ -233,7 +161,7 @@
                     }
                 }
 
-                // Pass 2: everyone chooses.
+                // Phase 2: Update strategies for all agents
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
                         const cell = gridInstance.cells[y][x];
@@ -242,19 +170,14 @@
                     }
                 }
 
-                // Pass 3: commit next-gen strategies globally.
+                // Phase 3: Finalize state transition and render
                 Prisoner.update();
-
-                // Pass 4: reflect the new state on screen.
                 drawGrid();
             }
 
             /**
-             * Self-rescheduling animation loop. Steps the simulation while
-             * `running` is true, then re-arms itself after `speed` ms.
-             *
-             * The timeout keeps running even when paused — cheap, and lets
-             * `running` be flipped back on without restarting the loop.
+             * Animation loop using setTimeout for controllable speed
+             * Continues indefinitely while running flag is true
              */
             function timeLoop() {
                 if (running) {
@@ -263,31 +186,22 @@
                 setTimeout(timeLoop, speed);
             }
 
-            // ─────────────────────────────────────────────────────────────
-            // INITIALISATION
-            // ─────────────────────────────────────────────────────────────
-
             /**
-             * (Re)create the grid, populate it with random Prisoners, and
-             * start the animation loop if it isn't already running.
-             *
-             * Called on load and on every window resize.
+             * Initializes the simulation grid with randomly assigned strategies
+             * Approximately 30% start as defectors, 70% as cooperators
              */
             function init() {
                 gridInstance = new Grid(caCanvas.cols, caCanvas.rows);
 
-                // Populate each cell with a random C or D.
+                // Create agent in each cell with randomized initial strategy
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
                         const cell = gridInstance.cells[y][x];
-
-                        // Agent self-registers with `cell` in its ctor,
-                        // so `cell.setOccupant(...)` below is redundant.
                         const newAgent = new Prisoner(cell);
                         cell.setOccupant(newAgent);
 
-                        // 50/50 coin flip for initial strategy.
-                        if (Math.random() < 0.5) {
+                        // 30% chance of defection, 70% cooperation initially
+                        if (Math.random() < 0.3) {
                             newAgent.setState("D");
                         } else {
                             newAgent.setState("C");
@@ -295,50 +209,49 @@
                     }
                 }
 
-                // Commit initial strategies to the "now" buffer, then draw.
                 Prisoner.update();
                 drawGrid();
-
                 running = true;
 
-                // Only ever start one loop chain.
+                // Start animation loop only once
                 if (!loopStarted) {
                     loopStarted = true;
                     timeLoop();
                 }
             }
 
-            // ─────────────────────────────────────────────────────────────
-            // RENDERING
-            // ─────────────────────────────────────────────────────────────
-
             /**
-             * Repaint the whole grid.
-             *
-             * Colour scheme:
-             *   - D, unchanged → blue
-             *   - D, changed   → light blue
-             *   - C, unchanged → red
-             *   - C, changed   → light red
-             *
-             * The border stroke (4th arg `true`) keeps adjacent cells
-             * visually separated even when colours are similar.
+             * Renders the current grid state to the canvas
+             * Color coding:
+             *   - Red (#ff0000): Cooperators who kept their strategy
+             *   - Light Red (#ff9999): Cooperators who just changed to cooperation
+             *   - Blue (#0000ff): Defectors who kept their strategy
+             *   - Light Blue (#9999ff): Defectors who just changed to defection
              */
             function drawGrid() {
                 caCanvas.clear();
-
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
-                        const cell = gridInstance.getCell(y, x); // note (y, x)
+                        const cell = gridInstance.getCell(y, x);
                         const occupant = cell.getOccupant();
-
                         let colour = "";
 
+                        // Defector colors (blue tones)
                         if (occupant.getState() == "D") {
-                            colour = occupant.changed ? "#9999ff" : "#0000ff";
+                            if (occupant.changed) {
+                                colour = "#9999ff"; // Changed to defection
+                            } else {
+                                colour = "#0000ff"; // Stable defector
+                            }
                         }
+
+                        // Cooperator colors (red tones)
                         if (occupant.getState() == "C") {
-                            colour = occupant.changed ? "#ff9999" : "#ff0000";
+                            if (occupant.changed) {
+                                colour = "#ff9999"; // Changed to cooperation
+                            } else {
+                                colour = "#ff0000"; // Stable cooperator
+                            }
                         }
 
                         caCanvas.drawSquareAt(x, y, colour, true);
@@ -346,24 +259,17 @@
                 }
             }
 
-            // ─────────────────────────────────────────────────────────────
-            // EVENT HANDLERS
-            // ─────────────────────────────────────────────────────────────
+            // Start the simulation
+            init();
 
             /**
-             * On window resize: recompute grid geometry and rebuild the
-             * simulation. Note this discards the current simulation state
-             * and starts a fresh random grid.
+             * Resize handler - recreates grid when browser window changes size
+             * Warning: This resets the entire simulation with new random initialization
              */
             function handleResize() {
                 caCanvas.resizeAndReset();
                 init();
             }
-
-            // ─────────────────────────────────────────────────────────────
-            // GO
-            // ─────────────────────────────────────────────────────────────
-            init();
         </script>
     </body>
 </html>

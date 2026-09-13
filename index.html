@@ -33,34 +33,41 @@
                 static now = 0;
                 static next = 1;
 
-
                 static update() {
-                  [Prisoner.now, Prisoner.next] = [Prisoner.next, Prisoner.now];
+                    [Prisoner.now, Prisoner.next] = [
+                        Prisoner.next,
+                        Prisoner.now,
+                    ];
                 }
 
                 constructor(home, state) {
                     super(home);
                     this.state = [state, ""];
                     this.score = 0;
+                    this.changed = false;
                 }
 
                 trial() {
                     this.score = 0;
-                    for (let i=0; i<this.home.neighbours.length;i++) {
+                    for (let i = 0; i < this.home.neighbours.length; i++) {
                         let nAgent = this.home.neighbours[i].getOccupant();
-                        this.score += Prisoner.payoff[this.getState()][nAgent.getState()];
+                        this.score +=
+                            Prisoner.payoff[this.getState()][nAgent.getState()];
                     }
                 }
 
                 change() {
                     let choice = this;
-                    for (let i=0; i<this.home.neighbours.length;i++) {
+                    this.changed = false;
+                    for (let i = 0; i < this.home.neighbours.length; i++) {
                         let nAgent = this.home.neighbours[i].getOccupant();
                         if (choice.score < nAgent.score) {
                             choice = nAgent;
+                            this.changed = true;
                         }
                     }
                     this.setState(choice.getState());
+
                 }
 
                 getState() {
@@ -79,16 +86,13 @@
             const canvasElement = document.getElementById("SIPDCanvas");
             const caCanvas = new CACanvas(canvasElement, 60);
 
-
             caCanvas.resizeAndReset();
             let gridInstance;
             let running = false;
             let speed = 100;
             let loopStarted = false;
 
-
             function iterate() {
-
                 if (!gridInstance) return;
                 for (let y = 0; y < gridInstance.rows; y++) {
                     for (let x = 0; x < gridInstance.cols; x++) {
@@ -146,10 +150,18 @@
                         const occupant = cell.getOccupant();
                         let colour = "";
                         if (occupant.getState() == "D") {
-                            colour = "blue";
+                            if (occupant.changed) {
+                                colour = "#9999ff";
+                            } else {
+                                colour = "#0000ff";
+                            }
                         }
                         if (occupant.getState() == "C") {
-                            colour = "red";
+                            if (occupant.changed) {
+                                colour = "#ff9999";
+                            } else {
+                                colour = "#ff0000";
+                            }
                         }
                         caCanvas.drawSquareAt(x, y, colour, true);
                     }
@@ -158,7 +170,7 @@
             init();
             function handleResize() {
                 caCanvas.resizeAndReset();
-                init()
+                init();
             }
         </script>
     </body>
